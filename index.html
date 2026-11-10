@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <title>Render 3D en Canvas - Scanline + Ray Tracing</title>
+  <title>Comparativa Final: Scanline, Ray Tracing y Oclusión Ambiental</title>
   <style>
     :root {
       --bg-dark: #0b1a13;
@@ -34,11 +34,18 @@
       padding: 12px 18px;
       border-radius: 8px;
       display: flex;
+      flex-wrap: wrap;
       gap: 15px;
       align-items: center;
       margin-bottom: 20px;
     }
-    select, button {
+    label {
+      font-size: 0.9rem;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    select, input[type="number"], button {
       background-color: var(--bg-dark);
       color: var(--text-light);
       border: 1px solid var(--border-green);
@@ -52,6 +59,16 @@
       font-weight: bold;
       cursor: pointer;
     }
+    button:hover {
+      background-color: #b82b2d;
+    }
+    .main-container {
+      display: flex;
+      gap: 25px;
+      flex-wrap: wrap;
+      justify-content: center;
+      align-items: flex-start;
+    }
     canvas {
       border: 2px solid var(--border-green);
       border-radius: 6px;
@@ -60,26 +77,102 @@
       width: 480px;
       height: 360px;
     }
+    .stats-panel {
+      background-color: var(--panel-bg);
+      border: 1px solid var(--border-green);
+      border-radius: 8px;
+      padding: 15px;
+      min-width: 300px;
+    }
+    .stats-panel h3 {
+      margin-top: 0;
+      color: var(--accent-green);
+      font-size: 1.1rem;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+      font-size: 0.9rem;
+    }
+    th, td {
+      border: 1px solid var(--border-green);
+      padding: 8px;
+      text-align: left;
+    }
+    th {
+      background-color: #0f2219;
+      color: var(--accent-red-light);
+    }
   </style>
 </head>
 <body>
 
-  <h1>Renderizador 3D: Scanline y Ray Tracing</h1>
+  <h1>Comparativa de Técnicas de Renderizado 3D</h1>
 
-  <!-- Selector básico -->
+  <!-- Barra de controles completa (Integrantes 1, 3 y 4) -->
   <div class="controls">
     <label>
       Técnica:
       <select id="techSelect">
         <option value="scanline" selected>1. Scanline (Z-Buffer + Sombreado Plano)</option>
         <option value="raytracing">2. Ray Tracing (Sombras + 1 Reflejo)</option>
-        <option value="ao">3. Oclusión Ambiental (Pendiente - Integrante 3)</option>
+        <option value="ao">3. Oclusión Ambiental (Muestreo Hemisferio)</option>
       </select>
     </label>
-    <button id="btnRender">Renderizar</button>
+
+    <label>
+      Resolución:
+      <select id="resSelect">
+        <option value="160x120">160 x 120 (Rápida)</option>
+        <option value="320x240" selected>320 x 240 (Media)</option>
+        <option value="480x360">480 x 360 (Alta)</option>
+      </select>
+    </label>
+
+    <label>
+      Muestras AO:
+      <input type="number" id="aoSamples" value="16" min="4" max="128" step="4" style="width: 55px;">
+    </label>
+
+    <button id="btnRender">Renderizar actual</button>
+    <button id="btnCompare">Comparar las 3</button>
   </div>
 
-  <canvas id="renderCanvas" width="320" height="240"></canvas>
+  <!-- Contenedor principal con Canvas y Tabla de Medición (Integrante 4) -->
+  <div class="main-container">
+    <canvas id="renderCanvas" width="320" height="240"></canvas>
+
+    <div class="stats-panel">
+      <h3>Medición de Tiempos (performance.now)</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Técnica</th>
+            <th>Resolución</th>
+            <th>Tiempo (ms)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Scanline</td>
+            <td id="res-scanline">-</td>
+            <td id="time-scanline">-</td>
+          </tr>
+          <tr>
+            <td>Ray Tracing</td>
+            <td id="res-raytracing">-</td>
+            <td id="time-raytracing">-</td>
+          </tr>
+          <tr>
+            <td>Oclusión Ambiental</td>
+            <td id="res-ao">-</td>
+            <td id="time-ao">-</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
 
   <script>
     // =========================================================
@@ -115,22 +208,18 @@
         ambient: 0.22,
         diffuse: 0.78
       },
-      bgColor: [11, 26, 19], // Verde pino oscuro (Fondo)
+      bgColor: [11, 26, 19],
       plane: {
         y: -1.0,
-        color: [34, 110, 68], // Verde bosque (Piso)
+        color: [34, 110, 68],
         reflectivity: 0.15
       },
       spheres: [
-        // Esfera izquierda: Rojo carmesí
         { center: { x: -0.95, y: -0.15, z: -3.5 }, radius: 0.85, color: [215, 45, 55], reflectivity: 0.35 },
-        // Esfera derecha: Verde esmeralda
         { center: { x: 0.95, y: -0.35, z: -3.2 }, radius: 0.65, color: [46, 196, 118], reflectivity: 0.2 },
-        // Esfera frontal pequeña: Rojo escarlata/coral
         { center: { x: -0.15, y: -0.68, z: -2.3 }, radius: 0.32, color: [242, 95, 76], reflectivity: 0.0 }
       ],
       cubes: [
-        // Cubo central-trasero: Verde menta oscuro
         { center: { x: 0.1, y: -0.4, z: -4.3 }, size: 1.2, color: [26, 147, 111], reflectivity: 0.05 }
       ]
     };
@@ -336,7 +425,6 @@
       let hitObj = null;
       let hitNormal = null;
 
-      // 1. Intersección con Esferas
       for (const s of scene.spheres) {
         const oc = Vec3.sub(origin, s.center);
         const b = 2 * Vec3.dot(oc, dir);
@@ -353,7 +441,6 @@
         }
       }
 
-      // 2. Intersección con Cubos (Método Slab AABB para mantener la misma escena)
       for (const cube of scene.cubes) {
         const h = cube.size / 2;
         const minB = { x: cube.center.x - h, y: cube.center.y - h, z: cube.center.z - h };
@@ -387,7 +474,6 @@
         }
       }
 
-      // 3. Intersección con el Plano Horizontal (Piso)
       if (Math.abs(dir.y) > 1e-5) {
         const t = (scene.plane.y - origin.y) / dir.y;
         if (t > 0.001 && t < closestT) {
@@ -422,7 +508,6 @@
       const lightDist = Vec3.len(lightVec);
       const lightDir = Vec3.norm(lightVec);
 
-      // Lanzar rayo de sombra hacia la luz
       const shadowOrigin = Vec3.add(hit.point, Vec3.mul(hit.normal, 0.002));
       const shadowHit = intersectScene(shadowOrigin, lightDir);
       const inShadow = shadowHit && shadowHit.t < lightDist;
@@ -436,7 +521,6 @@
         hit.color[2] * intensity
       ];
 
-      // Un rebote de reflejo especular
       if (depth < 1 && hit.reflectivity > 0) {
         const dotDN = Vec3.dot(dir, hit.normal);
         const reflDir = Vec3.norm(Vec3.sub(dir, Vec3.mul(hit.normal, 2 * dotDN)));
@@ -477,35 +561,110 @@
     }
 
     // =========================================================
-    // 6. ESPACIO RESERVADO PARA INTEGRANTE 3 (Oclusión Ambiental)
+    // 6. OCLUSIÓN AMBIENTAL: MUESTREO HEMISFÉRICO (Integrante 3)
     // =========================================================
-    function renderAmbientOcclusion(ctx, width, height) {
-      // TODO (Integrante 3): Implementar muestreo de rayos en el hemisferio
-      alert("Oclusión Ambiental aún no implementada (Parte del Integrante 3)");
+    function randomHemisphereDir(normal) {
+      while (true) {
+        const v = {
+          x: Math.random() * 2 - 1,
+          y: Math.random() * 2 - 1,
+          z: Math.random() * 2 - 1
+        };
+        if (Vec3.dot(v, v) <= 1) {
+          const dir = Vec3.norm(v);
+          return Vec3.dot(dir, normal) < 0 ? Vec3.mul(dir, -1) : dir;
+        }
+      }
+    }
+
+    function renderAmbientOcclusion(ctx, width, height, samples = 16) {
+      const imgData = ctx.createImageData(width, height);
+      const data = imgData.data;
+      const aspect = width / height;
+      const fovScale = Math.tan(((scene.camera.fov * Math.PI) / 180) / 2);
+      const aoRadius = 1.6;
+
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const px = (2 * ((x + 0.5) / width) - 1) * aspect * fovScale;
+          const py = (1 - 2 * ((y + 0.5) / height)) * fovScale;
+          const rayDir = Vec3.norm({ x: px, y: py, z: -1 });
+
+          const hit = intersectScene(scene.camera.pos, rayDir);
+          const idx = (y * width + x) * 4;
+
+          if (!hit) {
+            data[idx]     = scene.bgColor[0];
+            data[idx + 1] = scene.bgColor[1];
+            data[idx + 2] = scene.bgColor[2];
+            data[idx + 3] = 255;
+            continue;
+          }
+
+          let occluded = 0;
+          const origin = Vec3.add(hit.point, Vec3.mul(hit.normal, 0.003));
+          for (let s = 0; s < samples; s++) {
+            const sampleDir = randomHemisphereDir(hit.normal);
+            const aoHit = intersectScene(origin, sampleDir);
+            if (aoHit && aoHit.t < aoRadius) {
+              occluded++;
+            }
+          }
+
+          const accessibility = 1 - (occluded / samples);
+          data[idx]     = Math.min(255, hit.color[0] * accessibility);
+          data[idx + 1] = Math.min(255, hit.color[1] * accessibility);
+          data[idx + 2] = Math.min(255, hit.color[2] * accessibility);
+          data[idx + 3] = 255;
+        }
+      }
+      ctx.putImageData(imgData, 0, 0);
     }
 
     // =========================================================
-    // 7. INICIALIZACIÓN Y EVENTOS BÁSICOS
+    // 7. MEDICIÓN DE TIEMPOS Y COMPARACIÓN (Integrante 4)
     // =========================================================
     const canvas = document.getElementById('renderCanvas');
     const ctx = canvas.getContext('2d');
     const techSelect = document.getElementById('techSelect');
+    const resSelect = document.getElementById('resSelect');
+    const aoSamplesInput = document.getElementById('aoSamples');
 
-    function updateCanvas() {
-      const tech = techSelect.value;
+    function executeRender(tech) {
+      const [w, h] = resSelect.value.split('x').map(Number);
+      canvas.width = w;
+      canvas.height = h;
+      const samples = parseInt(aoSamplesInput.value, 10) || 16;
+
+      const t0 = performance.now();
       if (tech === 'scanline') {
-        renderScanline(ctx, canvas.width, canvas.height);
+        renderScanline(ctx, w, h);
       } else if (tech === 'raytracing') {
-        renderRayTracing(ctx, canvas.width, canvas.height);
+        renderRayTracing(ctx, w, h);
       } else if (tech === 'ao') {
-        renderAmbientOcclusion(ctx, canvas.width, canvas.height);
+        renderAmbientOcclusion(ctx, w, h, samples);
       }
+      const t1 = performance.now();
+      const elapsed = (t1 - t0).toFixed(2);
+
+      document.getElementById(res-${tech}).textContent = ${w}x${h};
+      document.getElementById(time-${tech}).textContent = ${elapsed} ms;
     }
 
-    document.getElementById('btnRender').addEventListener('click', updateCanvas);
-    techSelect.addEventListener('change', updateCanvas);
+    document.getElementById('btnRender').addEventListener('click', () => {
+      executeRender(techSelect.value);
+    });
 
-    renderScanline(ctx, canvas.width, canvas.height);
+    document.getElementById('btnCompare').addEventListener('click', () => {
+      ['scanline', 'raytracing', 'ao'].forEach(t => executeRender(t));
+      executeRender(techSelect.value); // Deja en el canvas la vista seleccionada
+    });
+
+    techSelect.addEventListener('change', () => executeRender(techSelect.value));
+    resSelect.addEventListener('change', () => executeRender(techSelect.value));
+
+    // Render inicial
+    executeRender('scanline');
   </script>
 </body>
 </html>
