@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Render 3D en Canvas - Escena Base y Scanline</title>
+  <style>
+    :root {
+      --bg-dark: #0b1a13;
+      --panel-bg: #132a1f;
+      --border-green: #26543d;
+      --accent-red: #d9383a;
+      --accent-red-light: #ff6b6b;
+      --accent-green: #4ecdc4;
+      --text-light: #e6f2ec;
+    }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background-color: var(--bg-dark);
+      color: var(--text-light);
+      margin: 0;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    h1 {
+      color: var(--accent-red-light);
+      margin-bottom: 12px;
+      font-size: 1.5rem;
+    }
+    .controls {
+      background-color: var(--panel-bg);
+      border: 1px solid var(--border-green);
+      padding: 12px 18px;
+      border-radius: 8px;
+      display: flex;
+      gap: 15px;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+    select, button {
+      background-color: var(--bg-dark);
+      color: var(--text-light);
+      border: 1px solid var(--border-green);
+      padding: 6px 10px;
+      border-radius: 4px;
+    }
+    button {
+      background-color: var(--accent-red);
+      border-color: var(--accent-red-light);
+      color: white;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    canvas {
+      border: 2px solid var(--border-green);
+      border-radius: 6px;
+      background-color: #050d09;
+      image-rendering: pixelated;
+      width: 480px;
+      height: 360px;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Renderizador 3D: Escena Base y Scanline</h1>
+
+  <!-- Selector básico para probar cada técnica -->
+  <div class="controls">
+    <label>
+      Técnica:
+      <select id="techSelect">
+        <option value="scanline" selected>1. Scanline (Z-Buffer + Sombreado Plano)</option>
+        <option value="raytracing">2. Ray Tracing (Pendiente - Integrante 2)</option>
+        <option value="ao">3. Oclusión Ambiental (Pendiente - Integrante 3)</option>
+      </select>
+    </label>
+    <button id="btnRender">Renderizar</button>
+  </div>
+
+  <canvas id="renderCanvas" width="320" height="240"></canvas>
+
+  <script>
+    // =========================================================
+    // 1. MATEMÁTICAS VECTORIALES 3D (Uso compartido del equipo)
+    // =========================================================
+    const Vec3 = {
+      add: (a, b) => ({ x: a.x + b.x, y: a.y + b.y, z: a.z + b.z }),
+      sub: (a, b) => ({ x: a.x - b.x, y: a.y - b.y, z: a.z - b.z }),
+      mul: (a, s) => ({ x: a.x * s, y: a.y * s, z: a.z * s }),
+      dot: (a, b) => a.x * b.x + a.y * b.y + a.z * b.z,
+      cross: (a, b) => ({
+        x: a.y * b.z - a.z * b.y,
+        y: a.z * b.x - a.x * b.z,
+        z: a.x * b.y - a.y * b.x
+      }),
+      len: (a) => Math.hypot(a.x, a.y, a.z),
+      norm: (a) => {
+        const l = Math.hypot(a.x, a.y, a.z) || 1;
+        return { x: a.x / l, y: a.y / l, z: a.z / l };
+      }
+    };
+
+    // =========================================================
+    // 2. ESCENA BASE: OBJETOS, CÁMARA Y LUZ (Integrante 1)
+    // =========================================================
+    const scene = {
+      camera: {
+        pos: { x: 0, y: 0.6, z: 0 },
+        fov: 60
+      },
+      light: {
+        pos: { x: 2.5, y: 3.5, z: -1.2 },
+        ambient: 0.22,
+        diffuse: 0.78
+      },
+      bgColor: [11, 26, 19], // Verde pino oscuro (Fondo)
+      plane: {
+        y: -1.0,
+        color: [34, 110, 68], // Verde bosque (Piso)
+        reflectivity: 0.1
+      },
+      spheres: [
+        // Esfera izquierda: Rojo carmesí
+        { center: { x: -0.95, y: -0.15, z: -3.5 }, radius: 0.85, color: [215, 45, 55], reflectivity: 0.35 },
+        // Esfera derecha: Verde esmeralda
+        { center: { x: 0.95, y: -0.35, z: -3.2 }, radius: 0.65, color: [46, 196, 118], reflectivity: 0.15 },
+        // Esfera frontal pequeña: Rojo escarlata/coral
+        { center: { x: -0.15, y: -0.68, z: -2.3 }, radius: 0.32, color: [242, 95, 76], reflectivity: 0.0 }
+      ],
+      cubes: [
+        // Cubo central-trasero: Verde menta oscuro
+        { center: { x: 0.1, y: -0.4, z: -4.3 }, size: 1.2, color: [26, 147, 111], reflectivity: 0.0 }
+      ]
+    };
+
+    // =========================================================
+    // 3. GENERACIÓN DE MALLAS DE TRIÁNGULOS (Integrante 1)
+    // =========================================================
+    
+    // Teselación de esfera a triángulos
+    function createSphereMesh(sphere, latBands = 14, lonBands = 14) {
+      const tris = [];
+      for (let lat = 0; lat < latBands; lat++) {
+        const theta1 = (lat * Math.PI) / latBands;
+        const theta2 = ((lat + 1) * Math.PI) / latBands;
+        for (let lon = 0; lon < lonBands; lon++) {
+          const phi1 = (lon * 2 * Math.PI) / lonBands;
+          const phi2 = ((lon + 1) * 2 * Math.PI) / lonBands;
+
+          const getPt = (t, p) => ({
+            x: sphere.center.x + sphere.radius * Math.sin(t) * Math.cos(p),
+            y: sphere.center.y + sphere.radius * Math.cos(t),
+            z: sphere.center.z + sphere.radius * Math.sin(t) * Math.sin(p)
+          });
+
+          const p1 = getPt(theta1, phi1);
+          const p2 = getPt(theta2, phi1);
+          const p3 = getPt(theta2, phi2);
+          const p4 = getPt(theta1, phi2);
+
+          if (lat !== 0) tris.push({ v0: p1, v1: p2, v2: p4, color: sphere.color });
+          if (lat !== latBands - 1) tris.push({ v0: p2, v1: p3, v2: p4, color: sphere.color });
+        }
+      }
+      return tris;
+    }
+
+    // Generación de los 12 triángulos de un cubo
+    function createCubeMesh(cube) {
+      const h = cube.size / 2;
+      const c = cube.center;
+      const v = [
+        { x: c.x - h, y: c.y - h, z: c.z + h }, // 0: Frente-Abajo-Izq
+        { x: c.x + h, y: c.y - h, z: c.z + h }, // 1: Frente-Abajo-Der
+        { x: c.x + h, y: c.y + h, z: c.z + h }, // 2: Frente-Arriba-Der
+        { x: c.x - h, y: c.y + h, z: c.z + h }, // 3: Frente-Arriba-Izq
+        { x: c.x - h, y: c.y - h, z: c.z - h }, // 4: Atrás-Abajo-Izq
+        { x: c.x + h, y: c.y - h, z: c.z - h }, // 5: Atrás-Abajo-Der
+        { x: c.x + h, y: c.y + h, z: c.z - h }, // 6: Atrás-Arriba-Der
+        { x: c.x - h, y: c.y + h, z: c.z - h }  // 7: Atrás-Arriba-Izq
+      ];
+      const indices = [
+        [0, 1, 2], [0, 2, 3], // Frente
+        [1, 5, 6], [1, 6, 2], // Derecha
+        [5, 4, 7], [5, 7, 6], // Atrás
+        [4, 0, 3], [4, 3, 7], // Izquierda
+        [3, 2, 6], [3, 6, 7], // Arriba
+        [4, 5, 1], [4, 1, 0]  // Abajo
+      ];
+      return indices.map(idx => ({
+        v0: v[idx[0]], v1: v[idx[1]], v2: v[idx[2]], color: cube.color
+      }));
+    }
+
+    // Cuadrícula de triángulos para el plano (piso)
+    function createPlaneMesh(y, color) {
+      const tris = [];
+      const size = 6, steps = 10;
+      const stepSize = (size * 2) / steps;
+      for (let i = 0; i < steps; i++) {
+        for (let j = 0; j < steps; j++) {
+          const x1 = -size + i * stepSize;
+          const x2 = x1 + stepSize;
+          const z1 = -1.2 - j * stepSize;
+          const z2 = z1 - stepSize;
+          const p1 = { x: x1, y, z: z1 }, p2 = { x: x1, y, z: z2 };
+          const p3 = { x: x2, y, z: z2 }, p4 = { x: x2, y, z: z1 };
+          tris.push({ v0: p1, v1: p2, v2: p3, color });
+          tris.push({ v0: p1, v1: p3, v2: p4, color });
+        }
+      }
+      return tris;
+    }
+
+    // =========================================================
+    // 4. SCANLINE: Z-BUFFER Y SOMBREADO PLANO (Integrante 1)
+    // =========================================================
+    function renderScanline(ctx, width, height) {
+      const imgData = ctx.createImageData(width, height);
+      const data = imgData.data;
+      const zBuffer = new Float32Array(width * height).fill(Infinity);
+
+      // 1. Pintar el color de fondo
+      for (let i = 0; i < width * height; i++) {
+        data[i * 4]     = scene.bgColor[0];
+        data[i * 4 + 1] = scene.bgColor[1];
+        data[i * 4 + 2] = scene.bgColor[2];
+        data[i * 4 + 3] = 255;
+      }
+
+      // 2. Reunir todos los triángulos de la escena (plano, cubos y esferas)
+      let triangles = createPlaneMesh(scene.plane.y, scene.plane.color);
+      for (const cube of scene.cubes) {
+        triangles = triangles.concat(createCubeMesh(cube));
+      }
+      for (const sphere of scene.spheres) {
+        triangles = triangles.concat(createSphereMesh(sphere, 14, 14));
+      }
+
+      // Configuración de proyección en perspectiva
+      const aspect = width / height;
+      const fovRad = (scene.camera.fov * Math.PI) / 180;
+      const f = 1 / Math.tan(fovRad / 2);
+
+      function projectVertex(v) {
+        const rel = Vec3.sub(v, scene.camera.pos);
+        const zDist = -rel.z; // Cámara mira hacia -Z
+        if (zDist <= 0.1) return null;
+        const xProj = (rel.x * f) / (aspect * zDist);
+        const yProj = (rel.y * f) / zDist;
+        return {
+          sx: (xProj + 1) * 0.5 * width,
+          sy: (1 - yProj) * 0.5 * height,
+          z: zDist
+        };
+      }
+
+      // 3. Procesar y rasterizar cada triángulo
+      for (const tri of triangles) {
+        const p0 = projectVertex(tri.v0);
+        const p1 = projectVertex(tri.v1);
+        const p2 = projectVertex(tri.v2);
+        if (!p0 || !p1 || !p2) continue;
+
+        // Sombreado Plano (Flat Shading): normal de la cara y producto punto con la luz
+        const e1 = Vec3.sub(tri.v1, tri.v0);
+        const e2 = Vec3.sub(tri.v2, tri.v0);
+        let normal = Vec3.norm(Vec3.cross(e1, e2));
+
+        const centroid = {
+          x: (tri.v0.x + tri.v1.x + tri.v2.x) / 3,
+          y: (tri.v0.y + tri.v1.y + tri.v2.y) / 3,
+          z: (tri.v0.z + tri.v1.z + tri.v2.z) / 3
+        };
+
+        // Asegurar que la normal apunte hacia la cámara
+        const toCam = Vec3.sub(scene.camera.pos, centroid);
+        if (Vec3.dot(normal, toCam) < 0) normal = Vec3.mul(normal, -1);
+
+        const lightDir = Vec3.norm(Vec3.sub(scene.light.pos, centroid));
+        const diff = Math.max(0, Vec3.dot(normal, lightDir));
+        const intensity = scene.light.ambient + scene.light.diffuse * diff;
+
+        const rCol = Math.min(255, tri.color[0] * intensity);
+        const gCol = Math.min(255, tri.color[1] * intensity);
+        const bCol = Math.min(255, tri.color[2] * intensity);
+
+        // Ordenar vértices por coordenada Y ascendente (p0.sy <= p1.sy <= p2.sy) para Scanline
+        const pts = [p0, p1, p2].sort((a, b) => a.sy - b.sy);
+        const [A, B, C] = pts;
+
+        const totalHeight = C.sy - A.sy;
+        if (totalHeight < 0.5) continue;
+
+        const yStart = Math.max(0, Math.ceil(A.sy));
+        const yEnd   = Math.min(height - 1, Math.floor(C.sy));
+
+        // Barrido línea por línea (Scanline)
+        for (let y = yStart; y <= yEnd; y++) {
+          const secondHalf = y > B.sy || B.sy === A.sy;
+          const segmentHeight = secondHalf ? (C.sy - B.sy) : (B.sy - A.sy);
+          if (segmentHeight === 0) continue;
+
+          const alpha = (y - A.sy) / totalHeight;
+          const beta  = (y - (secondHalf ? B.sy : A.sy)) / segmentHeight;
+
+          // Interpolar X y Z en los bordes izquierdo y derecho de la línea actual
+          let xLeft  = A.sx + (C.sx - A.sx) * alpha;
+          let zLeft  = A.z  + (C.z  - A.z)  * alpha;
+
+          let xRight = secondHalf
+            ? B.sx + (C.sx - B.sx) * beta
+            : A.sx + (B.sx - A.sx) * beta;
+          let zRight = secondHalf
+            ? B.z  + (C.z  - B.z)  * beta
+            : A.z  + (B.z  - A.z)  * beta;
+
+          if (xLeft > xRight) {
+            [xLeft, xRight] = [xRight, xLeft];
+            [zLeft, zRight] = [zRight, zLeft];
+          }
+
+          const xStart = Math.max(0, Math.ceil(xLeft));
+          const xEnd   = Math.min(width - 1, Math.floor(xRight));
+          const spanWidth = xRight - xLeft;
+
+          // Rellenar el tramo horizontal evaluando el Z-Buffer
+          for (let x = xStart; x <= xEnd; x++) {
+            const t = spanWidth > 0 ? (x - xLeft) / spanWidth : 0;
+            const z = zLeft + (zRight - zLeft) * t;
+            const idx = y * width + x;
+
+            if (z < zBuffer[idx]) {
+              zBuffer[idx] = z;
+              data[idx * 4]     = rCol;
+              data[idx * 4 + 1] = gCol;
+              data[idx * 4 + 2] = bCol;
+            }
+          }
+        }
+      }
+
+      ctx.putImageData(imgData, 0, 0);
+    }
+
+    // =========================================================
+    // 5. ESPACIOS RESERVADOS PARA INTEGRANTES 2, 3 Y 4
+    // =========================================================
+    function renderRayTracing(ctx, width, height) {
+      // TODO (Integrante 2): Implementar rayos primarios, intersección, sombras y reflejo
+      alert("Ray Tracing aún no implementado (Parte del Integrante 2)");
+    }
+
+    function renderAmbientOcclusion(ctx, width, height) {
+      // TODO (Integrante 3): Implementar muestreo de rayos en el hemisferio
+      alert("Oclusión Ambiental aún no implementada (Parte del Integrante 3)");
+    }
+
+    // =========================================================
+    // 6. INICIALIZACIÓN Y EVENTOS BÁSICOS
+    // =========================================================
+    const canvas = document.getElementById('renderCanvas');
+    const ctx = canvas.getContext('2d');
+    const techSelect = document.getElementById('techSelect');
+
+    function updateCanvas() {
+      const tech = techSelect.value;
+      if (tech === 'scanline') {
+        renderScanline(ctx, canvas.width, canvas.height);
+      } else if (tech === 'raytracing') {
+        renderRayTracing(ctx, canvas.width, canvas.height);
+      } else if (tech === 'ao') {
+        renderAmbientOcclusion(ctx, canvas.width, canvas.height);
+      }
+    }
+
+    document.getElementById('btnRender').addEventListener('click', updateCanvas);
+    techSelect.addEventListener('change', updateCanvas);
+
+    // Renderizar Scanline al cargar la página
+    renderScanline(ctx, canvas.width, canvas.height);
+  </script>
+</body>
+</html>
