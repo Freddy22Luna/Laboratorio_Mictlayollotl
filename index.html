@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <title>Render 3D en Canvas - Escena Base y Scanline</title>
+  <title>Render 3D en Canvas - Scanline + Ray Tracing</title>
   <style>
     :root {
       --bg-dark: #0b1a13;
@@ -64,15 +64,15 @@
 </head>
 <body>
 
-  <h1>Renderizador 3D: Escena Base y Scanline</h1>
+  <h1>Renderizador 3D: Scanline y Ray Tracing</h1>
 
-  <!-- Selector básico para probar cada técnica -->
+  <!-- Selector básico -->
   <div class="controls">
     <label>
       Técnica:
       <select id="techSelect">
         <option value="scanline" selected>1. Scanline (Z-Buffer + Sombreado Plano)</option>
-        <option value="raytracing">2. Ray Tracing (Pendiente - Integrante 2)</option>
+        <option value="raytracing">2. Ray Tracing (Sombras + 1 Reflejo)</option>
         <option value="ao">3. Oclusión Ambiental (Pendiente - Integrante 3)</option>
       </select>
     </label>
@@ -119,27 +119,25 @@
       plane: {
         y: -1.0,
         color: [34, 110, 68], // Verde bosque (Piso)
-        reflectivity: 0.1
+        reflectivity: 0.15
       },
       spheres: [
         // Esfera izquierda: Rojo carmesí
         { center: { x: -0.95, y: -0.15, z: -3.5 }, radius: 0.85, color: [215, 45, 55], reflectivity: 0.35 },
         // Esfera derecha: Verde esmeralda
-        { center: { x: 0.95, y: -0.35, z: -3.2 }, radius: 0.65, color: [46, 196, 118], reflectivity: 0.15 },
+        { center: { x: 0.95, y: -0.35, z: -3.2 }, radius: 0.65, color: [46, 196, 118], reflectivity: 0.2 },
         // Esfera frontal pequeña: Rojo escarlata/coral
         { center: { x: -0.15, y: -0.68, z: -2.3 }, radius: 0.32, color: [242, 95, 76], reflectivity: 0.0 }
       ],
       cubes: [
         // Cubo central-trasero: Verde menta oscuro
-        { center: { x: 0.1, y: -0.4, z: -4.3 }, size: 1.2, color: [26, 147, 111], reflectivity: 0.0 }
+        { center: { x: 0.1, y: -0.4, z: -4.3 }, size: 1.2, color: [26, 147, 111], reflectivity: 0.05 }
       ]
     };
 
     // =========================================================
     // 3. GENERACIÓN DE MALLAS DE TRIÁNGULOS (Integrante 1)
     // =========================================================
-    
-    // Teselación de esfera a triángulos
     function createSphereMesh(sphere, latBands = 14, lonBands = 14) {
       const tris = [];
       for (let lat = 0; lat < latBands; lat++) {
@@ -167,34 +165,29 @@
       return tris;
     }
 
-    // Generación de los 12 triángulos de un cubo
     function createCubeMesh(cube) {
       const h = cube.size / 2;
       const c = cube.center;
       const v = [
-        { x: c.x - h, y: c.y - h, z: c.z + h }, // 0: Frente-Abajo-Izq
-        { x: c.x + h, y: c.y - h, z: c.z + h }, // 1: Frente-Abajo-Der
-        { x: c.x + h, y: c.y + h, z: c.z + h }, // 2: Frente-Arriba-Der
-        { x: c.x - h, y: c.y + h, z: c.z + h }, // 3: Frente-Arriba-Izq
-        { x: c.x - h, y: c.y - h, z: c.z - h }, // 4: Atrás-Abajo-Izq
-        { x: c.x + h, y: c.y - h, z: c.z - h }, // 5: Atrás-Abajo-Der
-        { x: c.x + h, y: c.y + h, z: c.z - h }, // 6: Atrás-Arriba-Der
-        { x: c.x - h, y: c.y + h, z: c.z - h }  // 7: Atrás-Arriba-Izq
+        { x: c.x - h, y: c.y - h, z: c.z + h },
+        { x: c.x + h, y: c.y - h, z: c.z + h },
+        { x: c.x + h, y: c.y + h, z: c.z + h },
+        { x: c.x - h, y: c.y + h, z: c.z + h },
+        { x: c.x - h, y: c.y - h, z: c.z - h },
+        { x: c.x + h, y: c.y - h, z: c.z - h },
+        { x: c.x + h, y: c.y + h, z: c.z - h },
+        { x: c.x - h, y: c.y + h, z: c.z - h }
       ];
       const indices = [
-        [0, 1, 2], [0, 2, 3], // Frente
-        [1, 5, 6], [1, 6, 2], // Derecha
-        [5, 4, 7], [5, 7, 6], // Atrás
-        [4, 0, 3], [4, 3, 7], // Izquierda
-        [3, 2, 6], [3, 6, 7], // Arriba
-        [4, 5, 1], [4, 1, 0]  // Abajo
+        [0, 1, 2], [0, 2, 3], [1, 5, 6], [1, 6, 2],
+        [5, 4, 7], [5, 7, 6], [4, 0, 3], [4, 3, 7],
+        [3, 2, 6], [3, 6, 7], [4, 5, 1], [4, 1, 0]
       ];
       return indices.map(idx => ({
         v0: v[idx[0]], v1: v[idx[1]], v2: v[idx[2]], color: cube.color
       }));
     }
 
-    // Cuadrícula de triángulos para el plano (piso)
     function createPlaneMesh(y, color) {
       const tris = [];
       const size = 6, steps = 10;
@@ -222,7 +215,6 @@
       const data = imgData.data;
       const zBuffer = new Float32Array(width * height).fill(Infinity);
 
-      // 1. Pintar el color de fondo
       for (let i = 0; i < width * height; i++) {
         data[i * 4]     = scene.bgColor[0];
         data[i * 4 + 1] = scene.bgColor[1];
@@ -230,7 +222,6 @@
         data[i * 4 + 3] = 255;
       }
 
-      // 2. Reunir todos los triángulos de la escena (plano, cubos y esferas)
       let triangles = createPlaneMesh(scene.plane.y, scene.plane.color);
       for (const cube of scene.cubes) {
         triangles = triangles.concat(createCubeMesh(cube));
@@ -239,14 +230,13 @@
         triangles = triangles.concat(createSphereMesh(sphere, 14, 14));
       }
 
-      // Configuración de proyección en perspectiva
       const aspect = width / height;
       const fovRad = (scene.camera.fov * Math.PI) / 180;
       const f = 1 / Math.tan(fovRad / 2);
 
       function projectVertex(v) {
         const rel = Vec3.sub(v, scene.camera.pos);
-        const zDist = -rel.z; // Cámara mira hacia -Z
+        const zDist = -rel.z;
         if (zDist <= 0.1) return null;
         const xProj = (rel.x * f) / (aspect * zDist);
         const yProj = (rel.y * f) / zDist;
@@ -257,14 +247,12 @@
         };
       }
 
-      // 3. Procesar y rasterizar cada triángulo
       for (const tri of triangles) {
         const p0 = projectVertex(tri.v0);
         const p1 = projectVertex(tri.v1);
         const p2 = projectVertex(tri.v2);
         if (!p0 || !p1 || !p2) continue;
 
-        // Sombreado Plano (Flat Shading): normal de la cara y producto punto con la luz
         const e1 = Vec3.sub(tri.v1, tri.v0);
         const e2 = Vec3.sub(tri.v2, tri.v0);
         let normal = Vec3.norm(Vec3.cross(e1, e2));
@@ -275,7 +263,6 @@
           z: (tri.v0.z + tri.v1.z + tri.v2.z) / 3
         };
 
-        // Asegurar que la normal apunte hacia la cámara
         const toCam = Vec3.sub(scene.camera.pos, centroid);
         if (Vec3.dot(normal, toCam) < 0) normal = Vec3.mul(normal, -1);
 
@@ -287,7 +274,6 @@
         const gCol = Math.min(255, tri.color[1] * intensity);
         const bCol = Math.min(255, tri.color[2] * intensity);
 
-        // Ordenar vértices por coordenada Y ascendente (p0.sy <= p1.sy <= p2.sy) para Scanline
         const pts = [p0, p1, p2].sort((a, b) => a.sy - b.sy);
         const [A, B, C] = pts;
 
@@ -297,7 +283,6 @@
         const yStart = Math.max(0, Math.ceil(A.sy));
         const yEnd   = Math.min(height - 1, Math.floor(C.sy));
 
-        // Barrido línea por línea (Scanline)
         for (let y = yStart; y <= yEnd; y++) {
           const secondHalf = y > B.sy || B.sy === A.sy;
           const segmentHeight = secondHalf ? (C.sy - B.sy) : (B.sy - A.sy);
@@ -306,7 +291,6 @@
           const alpha = (y - A.sy) / totalHeight;
           const beta  = (y - (secondHalf ? B.sy : A.sy)) / segmentHeight;
 
-          // Interpolar X y Z en los bordes izquierdo y derecho de la línea actual
           let xLeft  = A.sx + (C.sx - A.sx) * alpha;
           let zLeft  = A.z  + (C.z  - A.z)  * alpha;
 
@@ -326,7 +310,6 @@
           const xEnd   = Math.min(width - 1, Math.floor(xRight));
           const spanWidth = xRight - xLeft;
 
-          // Rellenar el tramo horizontal evaluando el Z-Buffer
           for (let x = xStart; x <= xEnd; x++) {
             const t = spanWidth > 0 ? (x - xLeft) / spanWidth : 0;
             const z = zLeft + (zRight - zLeft) * t;
@@ -346,20 +329,163 @@
     }
 
     // =========================================================
-    // 5. ESPACIOS RESERVADOS PARA INTEGRANTES 2, 3 Y 4
+    // 5. RAY TRACING: INTERSECCIONES, SOMBRAS Y REFLEJO (Integrante 2)
     // =========================================================
-    function renderRayTracing(ctx, width, height) {
-      // TODO (Integrante 2): Implementar rayos primarios, intersección, sombras y reflejo
-      alert("Ray Tracing aún no implementado (Parte del Integrante 2)");
+    function intersectScene(origin, dir) {
+      let closestT = Infinity;
+      let hitObj = null;
+      let hitNormal = null;
+
+      // 1. Intersección con Esferas
+      for (const s of scene.spheres) {
+        const oc = Vec3.sub(origin, s.center);
+        const b = 2 * Vec3.dot(oc, dir);
+        const c = Vec3.dot(oc, oc) - s.radius * s.radius;
+        const disc = b * b - 4 * c;
+        if (disc > 0) {
+          const t = (-b - Math.sqrt(disc)) / 2;
+          if (t > 0.001 && t < closestT) {
+            closestT = t;
+            hitObj = s;
+            const hitPt = Vec3.add(origin, Vec3.mul(dir, t));
+            hitNormal = Vec3.norm(Vec3.sub(hitPt, s.center));
+          }
+        }
+      }
+
+      // 2. Intersección con Cubos (Método Slab AABB para mantener la misma escena)
+      for (const cube of scene.cubes) {
+        const h = cube.size / 2;
+        const minB = { x: cube.center.x - h, y: cube.center.y - h, z: cube.center.z - h };
+        const maxB = { x: cube.center.x + h, y: cube.center.y + h, z: cube.center.z + h };
+
+        let tmin = -Infinity, tmax = Infinity;
+        for (const axis of ['x', 'y', 'z']) {
+          if (Math.abs(dir[axis]) > 1e-6) {
+            let t1 = (minB[axis] - origin[axis]) / dir[axis];
+            let t2 = (maxB[axis] - origin[axis]) / dir[axis];
+            if (t1 > t2) [t1, t2] = [t2, t1];
+            tmin = Math.max(tmin, t1);
+            tmax = Math.min(tmax, t2);
+          } else if (origin[axis] < minB[axis] || origin[axis] > maxB[axis]) {
+            tmin = Infinity;
+            break;
+          }
+        }
+
+        if (tmax >= tmin && tmin > 0.001 && tmin < closestT) {
+          closestT = tmin;
+          hitObj = cube;
+          const hitPt = Vec3.add(origin, Vec3.mul(dir, tmin));
+          const eps = 1e-3;
+          if (Math.abs(hitPt.x - minB.x) < eps) hitNormal = { x: -1, y: 0, z: 0 };
+          else if (Math.abs(hitPt.x - maxB.x) < eps) hitNormal = { x: 1, y: 0, z: 0 };
+          else if (Math.abs(hitPt.y - minB.y) < eps) hitNormal = { x: 0, y: -1, z: 0 };
+          else if (Math.abs(hitPt.y - maxB.y) < eps) hitNormal = { x: 0, y: 1, z: 0 };
+          else if (Math.abs(hitPt.z - minB.z) < eps) hitNormal = { x: 0, y: 0, z: -1 };
+          else hitNormal = { x: 0, y: 0, z: 1 };
+        }
+      }
+
+      // 3. Intersección con el Plano Horizontal (Piso)
+      if (Math.abs(dir.y) > 1e-5) {
+        const t = (scene.plane.y - origin.y) / dir.y;
+        if (t > 0.001 && t < closestT) {
+          const hitPt = Vec3.add(origin, Vec3.mul(dir, t));
+          if (hitPt.z < -1.0 && hitPt.z > -14.0 && Math.abs(hitPt.x) < 7.0) {
+            closestT = t;
+            const isAlt = (Math.floor(hitPt.x) + Math.floor(hitPt.z)) % 2 === 0;
+            hitObj = {
+              color: isAlt ? scene.plane.color : [22, 78, 48],
+              reflectivity: scene.plane.reflectivity
+            };
+            hitNormal = { x: 0, y: 1, z: 0 };
+          }
+        }
+      }
+
+      if (!hitObj) return null;
+      return {
+        t: closestT,
+        point: Vec3.add(origin, Vec3.mul(dir, closestT)),
+        normal: hitNormal,
+        color: hitObj.color,
+        reflectivity: hitObj.reflectivity || 0
+      };
     }
 
+    function traceRay(origin, dir, depth = 0) {
+      const hit = intersectScene(origin, dir);
+      if (!hit) return scene.bgColor;
+
+      const lightVec = Vec3.sub(scene.light.pos, hit.point);
+      const lightDist = Vec3.len(lightVec);
+      const lightDir = Vec3.norm(lightVec);
+
+      // Lanzar rayo de sombra hacia la luz
+      const shadowOrigin = Vec3.add(hit.point, Vec3.mul(hit.normal, 0.002));
+      const shadowHit = intersectScene(shadowOrigin, lightDir);
+      const inShadow = shadowHit && shadowHit.t < lightDist;
+
+      const diff = inShadow ? 0 : Math.max(0, Vec3.dot(hit.normal, lightDir));
+      const intensity = scene.light.ambient + scene.light.diffuse * diff;
+
+      let localColor = [
+        hit.color[0] * intensity,
+        hit.color[1] * intensity,
+        hit.color[2] * intensity
+      ];
+
+      // Un rebote de reflejo especular
+      if (depth < 1 && hit.reflectivity > 0) {
+        const dotDN = Vec3.dot(dir, hit.normal);
+        const reflDir = Vec3.norm(Vec3.sub(dir, Vec3.mul(hit.normal, 2 * dotDN)));
+        const reflOrigin = Vec3.add(hit.point, Vec3.mul(hit.normal, 0.002));
+        const reflColor = traceRay(reflOrigin, reflDir, depth + 1);
+        const r = hit.reflectivity;
+        localColor = [
+          localColor[0] * (1 - r) + reflColor[0] * r,
+          localColor[1] * (1 - r) + reflColor[1] * r,
+          localColor[2] * (1 - r) + reflColor[2] * r
+        ];
+      }
+
+      return localColor;
+    }
+
+    function renderRayTracing(ctx, width, height) {
+      const imgData = ctx.createImageData(width, height);
+      const data = imgData.data;
+      const aspect = width / height;
+      const fovScale = Math.tan(((scene.camera.fov * Math.PI) / 180) / 2);
+
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const px = (2 * ((x + 0.5) / width) - 1) * aspect * fovScale;
+          const py = (1 - 2 * ((y + 0.5) / height)) * fovScale;
+          const rayDir = Vec3.norm({ x: px, y: py, z: -1 });
+
+          const col = traceRay(scene.camera.pos, rayDir, 0);
+          const idx = (y * width + x) * 4;
+          data[idx]     = Math.min(255, col[0]);
+          data[idx + 1] = Math.min(255, col[1]);
+          data[idx + 2] = Math.min(255, col[2]);
+          data[idx + 3] = 255;
+        }
+      }
+      ctx.putImageData(imgData, 0, 0);
+    }
+
+    // =========================================================
+    // 6. ESPACIO RESERVADO PARA INTEGRANTE 3 (Oclusión Ambiental)
+    // =========================================================
     function renderAmbientOcclusion(ctx, width, height) {
       // TODO (Integrante 3): Implementar muestreo de rayos en el hemisferio
       alert("Oclusión Ambiental aún no implementada (Parte del Integrante 3)");
     }
 
     // =========================================================
-    // 6. INICIALIZACIÓN Y EVENTOS BÁSICOS
+    // 7. INICIALIZACIÓN Y EVENTOS BÁSICOS
     // =========================================================
     const canvas = document.getElementById('renderCanvas');
     const ctx = canvas.getContext('2d');
@@ -379,7 +505,6 @@
     document.getElementById('btnRender').addEventListener('click', updateCanvas);
     techSelect.addEventListener('change', updateCanvas);
 
-    // Renderizar Scanline al cargar la página
     renderScanline(ctx, canvas.width, canvas.height);
   </script>
 </body>
