@@ -647,8 +647,8 @@
       const t1 = performance.now();
       const elapsed = (t1 - t0).toFixed(2);
 
-      document.getElementById(res-${tech}).textContent = ${w}x${h};
-      document.getElementById(time-${tech}).textContent = ${elapsed} ms;
+      document.getElementById('res-' + tech).textContent = w + 'x' + h;
+      document.getElementById('time-' + tech).textContent = elapsed + ' ms';
     }
 
     document.getElementById('btnRender').addEventListener('click', () => {
@@ -657,7 +657,7 @@
 
     document.getElementById('btnCompare').addEventListener('click', () => {
       ['scanline', 'raytracing', 'ao'].forEach(t => executeRender(t));
-      executeRender(techSelect.value); // Deja en el canvas la vista seleccionada
+      executeRender(techSelect.value);
     });
 
     techSelect.addEventListener('change', () => executeRender(techSelect.value));
