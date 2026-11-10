@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <title>Render 3D en Canvas - Scanline + Ray Tracing</title>
+  <title>Render 3D en Canvas - Scanline, Ray Tracing y AO</title>
   <style>
     :root {
       --bg-dark: #0b1a13;
@@ -34,11 +34,12 @@
       padding: 12px 18px;
       border-radius: 8px;
       display: flex;
+      flex-wrap: wrap;
       gap: 15px;
       align-items: center;
       margin-bottom: 20px;
     }
-    select, button {
+    select, input[type="number"], button {
       background-color: var(--bg-dark);
       color: var(--text-light);
       border: 1px solid var(--border-green);
@@ -64,18 +65,24 @@
 </head>
 <body>
 
-  <h1>Renderizador 3D: Scanline y Ray Tracing</h1>
+  <h1>Renderizador 3D: Scanline, Ray Tracing y Oclusión Ambiental</h1>
 
-  <!-- Selector básico -->
+  <!-- Controles con número de muestras AO ajustable (Integrante 3) -->
   <div class="controls">
     <label>
       Técnica:
       <select id="techSelect">
         <option value="scanline" selected>1. Scanline (Z-Buffer + Sombreado Plano)</option>
         <option value="raytracing">2. Ray Tracing (Sombras + 1 Reflejo)</option>
-        <option value="ao">3. Oclusión Ambiental (Pendiente - Integrante 3)</option>
+        <option value="ao">3. Oclusión Ambiental (Muestreo Hemisferio)</option>
       </select>
     </label>
+
+    <label>
+      Muestras AO:
+      <input type="number" id="aoSamples" value="16" min="4" max="128" step="4" style="width: 55px;">
+    </label>
+
     <button id="btnRender">Renderizar</button>
   </div>
 
@@ -115,22 +122,18 @@
         ambient: 0.22,
         diffuse: 0.78
       },
-      bgColor: [11, 26, 19], // Verde pino oscuro (Fondo)
+      bgColor: [11, 26, 19],
       plane: {
         y: -1.0,
-        color: [34, 110, 68], // Verde bosque (Piso)
+        color: [34, 110, 68],
         reflectivity: 0.15
       },
       spheres: [
-        // Esfera izquierda: Rojo carmesí
         { center: { x: -0.95, y: -0.15, z: -3.5 }, radius: 0.85, color: [215, 45, 55], reflectivity: 0.35 },
-        // Esfera derecha: Verde esmeralda
         { center: { x: 0.95, y: -0.35, z: -3.2 }, radius: 0.65, color: [46, 196, 118], reflectivity: 0.2 },
-        // Esfera frontal pequeña: Rojo escarlata/coral
         { center: { x: -0.15, y: -0.68, z: -2.3 }, radius: 0.32, color: [242, 95, 76], reflectivity: 0.0 }
       ],
       cubes: [
-        // Cubo central-trasero: Verde menta oscuro
         { center: { x: 0.1, y: -0.4, z: -4.3 }, size: 1.2, color: [26, 147, 111], reflectivity: 0.05 }
       ]
     };
@@ -336,7 +339,6 @@
       let hitObj = null;
       let hitNormal = null;
 
-      // 1. Intersección con Esferas
       for (const s of scene.spheres) {
         const oc = Vec3.sub(origin, s.center);
         const b = 2 * Vec3.dot(oc, dir);
@@ -353,7 +355,6 @@
         }
       }
 
-      // 2. Intersección con Cubos (Método Slab AABB para mantener la misma escena)
       for (const cube of scene.cubes) {
         const h = cube.size / 2;
         const minB = { x: cube.center.x - h, y: cube.center.y - h, z: cube.center.z - h };
@@ -387,7 +388,6 @@
         }
       }
 
-      // 3. Intersección con el Plano Horizontal (Piso)
       if (Math.abs(dir.y) > 1e-5) {
         const t = (scene.plane.y - origin.y) / dir.y;
         if (t > 0.001 && t < closestT) {
@@ -422,7 +422,6 @@
       const lightDist = Vec3.len(lightVec);
       const lightDir = Vec3.norm(lightVec);
 
-      // Lanzar rayo de sombra hacia la luz
       const shadowOrigin = Vec3.add(hit.point, Vec3.mul(hit.normal, 0.002));
       const shadowHit = intersectScene(shadowOrigin, lightDir);
       const inShadow = shadowHit && shadowHit.t < lightDist;
@@ -436,7 +435,6 @@
         hit.color[2] * intensity
       ];
 
-      // Un rebote de reflejo especular
       if (depth < 1 && hit.reflectivity > 0) {
         const dotDN = Vec3.dot(dir, hit.normal);
         const reflDir = Vec3.norm(Vec3.sub(dir, Vec3.mul(hit.normal, 2 * dotDN)));
@@ -477,11 +475,64 @@
     }
 
     // =========================================================
-    // 6. ESPACIO RESERVADO PARA INTEGRANTE 3 (Oclusión Ambiental)
+    // 6. OCLUSIÓN AMBIENTAL: MUESTREO HEMISFÉRICO (Integrante 3)
     // =========================================================
-    function renderAmbientOcclusion(ctx, width, height) {
-      // TODO (Integrante 3): Implementar muestreo de rayos en el hemisferio
-      alert("Oclusión Ambiental aún no implementada (Parte del Integrante 3)");
+    function randomHemisphereDir(normal) {
+      while (true) {
+        const v = {
+          x: Math.random() * 2 - 1,
+          y: Math.random() * 2 - 1,
+          z: Math.random() * 2 - 1
+        };
+        if (Vec3.dot(v, v) <= 1) {
+          const dir = Vec3.norm(v);
+          return Vec3.dot(dir, normal) < 0 ? Vec3.mul(dir, -1) : dir;
+        }
+      }
+    }
+
+    function renderAmbientOcclusion(ctx, width, height, samples = 16) {
+      const imgData = ctx.createImageData(width, height);
+      const data = imgData.data;
+      const aspect = width / height;
+      const fovScale = Math.tan(((scene.camera.fov * Math.PI) / 180) / 2);
+      const aoRadius = 1.6; // Radio de alcance de oclusión
+
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const px = (2 * ((x + 0.5) / width) - 1) * aspect * fovScale;
+          const py = (1 - 2 * ((y + 0.5) / height)) * fovScale;
+          const rayDir = Vec3.norm({ x: px, y: py, z: -1 });
+
+          const hit = intersectScene(scene.camera.pos, rayDir);
+          const idx = (y * width + x) * 4;
+
+          if (!hit) {
+            data[idx]     = scene.bgColor[0];
+            data[idx + 1] = scene.bgColor[1];
+            data[idx + 2] = scene.bgColor[2];
+            data[idx + 3] = 255;
+            continue;
+          }
+
+          let occluded = 0;
+          const origin = Vec3.add(hit.point, Vec3.mul(hit.normal, 0.003));
+          for (let s = 0; s < samples; s++) {
+            const sampleDir = randomHemisphereDir(hit.normal);
+            const aoHit = intersectScene(origin, sampleDir);
+            if (aoHit && aoHit.t < aoRadius) {
+              occluded++;
+            }
+          }
+
+          const accessibility = 1 - (occluded / samples);
+          data[idx]     = Math.min(255, hit.color[0] * accessibility);
+          data[idx + 1] = Math.min(255, hit.color[1] * accessibility);
+          data[idx + 2] = Math.min(255, hit.color[2] * accessibility);
+          data[idx + 3] = 255;
+        }
+      }
+      ctx.putImageData(imgData, 0, 0);
     }
 
     // =========================================================
@@ -490,15 +541,17 @@
     const canvas = document.getElementById('renderCanvas');
     const ctx = canvas.getContext('2d');
     const techSelect = document.getElementById('techSelect');
+    const aoSamplesInput = document.getElementById('aoSamples');
 
     function updateCanvas() {
       const tech = techSelect.value;
+      const samples = parseInt(aoSamplesInput.value, 10) || 16;
       if (tech === 'scanline') {
         renderScanline(ctx, canvas.width, canvas.height);
       } else if (tech === 'raytracing') {
         renderRayTracing(ctx, canvas.width, canvas.height);
       } else if (tech === 'ao') {
-        renderAmbientOcclusion(ctx, canvas.width, canvas.height);
+        renderAmbientOcclusion(ctx, canvas.width, canvas.height, samples);
       }
     }
 
